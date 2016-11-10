@@ -1,1 +1,4 @@
- 
+
+
+""" Initialization of the module """
+
