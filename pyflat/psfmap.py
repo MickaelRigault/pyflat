@@ -11,7 +11,7 @@ class PSFMap(object):
 		self.height=height
 		self.map=np.zeros((self.width+202,self.height+202))+10**-200
 
-	def get_psf_map(self,x,y,f,seeing):
+	def get_psf_map(self, x, y, f, seeing):
 		""" get a array (width x height) with simulated stars located at x, y
 			properties of the stars are the sep flux and the seeing of the image
 	
@@ -47,27 +47,28 @@ class PSFMap(object):
 				for i in range(0,len(x)):
 					if i%100==0:
 						print i, '/', len(x)
-					self.map[int(x[i]+1):int(x[i]+201),int(y[i]+1):int(y[i]+201)]+=self.get_psf(x[i],y[i],seeing[i],200,'2gauss')*f[i]
+					self.map[int(x[i]+1):int(x[i]+201),int(y[i]+1):int(y[i]+201)]\
+                      +=self.get_psf(x[i],y[i],seeing[i],200,'2gauss')*f[i]
 	
 		return self.map[101:-101,101:-101]
 	
 	def get_psf(self,a,b,c,d,param):
+        """ """
 		if param=='2gauss':
 			return self._psf_2gaussians(a,b,c,d) 
 
 	def show(self):
+        """ """
 		plt.imshow(np.log10(self.map[101:-101,101:-101]),interpolation='nearest',vmin=-15)
 		plt.show()
 
-	def _psf_2gaussians(self,xp,yp,seeing,w):
+	def _psf_2gaussians(self, xp, yp, seeing, w):
+        """ """
 		xg,yg=np.mgrid[0:w:1,0:w:1]
 		pos=np.empty(xg.shape+(2,))
 		pos[:, :, 0]=xg; pos[:, :, 1]=yg
-		gauss1=multivariate_normal.pdf(pos,mean=[w/2.+(xp%1)-0.01386,w/2.+(yp%1)-0.03465],cov=[[8/9.,.0],[.0,8/9.]])
-		gauss2=multivariate_normal.pdf(pos,mean=[w/2.+(xp%1)-0.24257,w/2.+(yp%1)-0.62871], cov=[[5.,.0],[.0,5.]])
+		gauss1=multivariate_normal.pdf(pos,mean=[w/2.+(xp%1)-0.01386,w/2.+(yp%1)-0.03465],
+                                       cov=[[8/9.,.0],[.0,8/9.]])
+		gauss2=multivariate_normal.pdf(pos,mean=[w/2.+(xp%1)-0.24257,w/2.+(yp%1)-0.62871],
+                                       cov=[[5.,.0],[.0,5.]])
 		return (gauss1*0.9+gauss2*0.1)*0.877857887
-
-
-
-
-
