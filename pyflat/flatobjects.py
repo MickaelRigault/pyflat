@@ -10,187 +10,147 @@ import numpy     as np
 from astropy import units
 
 # - Astrobject
-from astrobject.utils.decorators import _autogen_docstring_inheritance
-from astrobject.baseobject import CatalogueHandler
-from astrobject.collection import BaseCollection
-from astrobject.collections.photospatial import get_sepobject, PhotoMap
+from astrobject.utils.tools import kwargs_update
+from astrobject.collections.photospatial import PhotoMapCollection
 
 
-def get_sepcollection( filenames, **kwargs):
-    """ """
-    list_photomaps = [get_sepobject(filename, **kwargs) for filename in filenames]    
-    return PhotoMapCollection(list_photomaps, id_=np.range(len(filenames)))
+
+def get_flatfielder( photomaps, wcs_extension=None, **kwargs ):
+    """ Get a PhotoMap collection
+
+    Parameters
+    ----------
+    photomaps: [list of photomaps or filenames of]
+        The photomaps of roughly a same area that you want to combine into a collection
+        if a list of filename is given, get_sepobject() will be used to read them.
+        This could be e.g. sep or sextractor outputs
+
+    wcs_extension: [int/None] -optional-
+        If the given data are fitfiles, you can specify the extension of the header
+        containing the wcs solution if any. Leave this to None if no wcs solution have
+        to be loaded.
+
+    **kwargs goes to the PhotoMapCollection __init__ (catalogue etc.)
+    
+    Returns
+    -------
+    PhotoMapCollection
+    """
+    from astrobject import get_sepobject
+    
+    if not hasattr(photomaps, "__iter__"):
+        raise TypeError("photomaps must be a list/array")
+
+    # -- loading data
+    if type(photomaps[0]) == str:
+        photomaps = [get_sepobject(filename, wcs_extension=wcs_extension, **kwargs) for filename in photomaps]
+        if wcs_extension is not None:
+            [p._derive_radec_() for p in photomaps if p.has_wcs()]
+
+    return FlatFielder(photomaps, **kwargs)
+
+    
+#######################################
+#                                     #
+#                                     #
+#   Flat Fielder                      #
+#                                     #
+#                                     #
+#######################################
+
+class FlatFielder( PhotoMapCollection ):
+    """ Collection gathering flatfielding observation """
 
 
-class PhotoMapCollection( BaseCollection, CatalogueHandler ):
-    """ Collection of PhotoMaps """
-
-    PROPERTIES         = []
-    SIDE_PROPERTIES    = []
-    DERIVED_PROPERTIES = []
-
-    def __init__(self, photomaps=None, empty=False, catalogue=None, **kwargs):
-        """ """
-        self.__build__()
-        if empty:
-            return
-
-        # - Load the Catalogue if given
-        if catalogue is not None:
-            self.set_catalogue(catalogue, **kwargs)
-            
-        # - Load any given photomap
-        if photomaps is not None:
-            if hasattr(photomaps, "__iter__"):
-                [self.add_photomap(photomap, **kwargs) for photomap in photomaps]
-            else:
-                self.add_photomap(photomaps, **kwargs)
-
-    # =================== #
-    #   Main Methods      #
-    # =================== #
-    def add_photomap(self, photomap, id_=None,
-                     match_catalogue=True, **kwargs):
-        """ 
-        This method enables to load the given photomap in the
-        self.photomaps container (dict).
+    # ==================== #
+    #  Main Methods        #
+    # ==================== #
+    # --------- #
+    #  GETTER   #
+    # --------- #
+    def getcat_residual(self, param, catindex):
+        """ get the residual parameter resulting from the
+        difference between the parameter value in a given photomaps in
+        comparison the its mean value accross the photomaps.
+        
+        Returns
+        -------
+        Arrays [NxM] where N is not number of photomaps and M the size of catindex
+        """
+        if hasattr(param, "__iter__"):
+            raise TypeError("param must be a string not an array")
+        if type(param) != str:
+            raise TypeError("param must be a string (name of the parameter)")
+        
+        value = np.asarray(self.getcat(param, catindex))
+        return value- np.nanmean(value, axis=0)
+        
+    # --------- #
+    #  Project  #
+    # --------- #
+    def projec_to_grid(self):
+        pass
+    # --------- #
+    #  PLOTTER  #
+    # --------- #
+    def show(self, ax=None, show=True, savefile=None,
+             shownstep=1,
+             cmap=None, catindexes=None, prop_catindex={}, **kwargs):
+        """
         
         Parameters
         ----------
-        new_image: [string or astrobject's Image (or children)]
 
-        - option -
-        id_: [any]
-            key used to access the photomap from the _handler.
-            id_ is set the photopoint's bandname if None
-
-        **kwargs goes to catalogue matching.
-        Return
-        ------
+        shownstep: [int] -optional-
+            Catalogue entries skipped from the plot ([::shownstep]).
+            1 means no skipping
+        
+        **kwargs any mpl.scatter parameter
+        
+        Returns
+        -------
         Void
         """
-        # --------------
-        # - Define ID
-        if photomap is None:
-            return
+        import matplotlib.pyplot as mpl
+        from astrobject.utils.mpladdon import figout
 
-        if PhotoMap not in photomap.__class__.__mro__:
-            raise TypeError("The givem photomap must be (or inherate of) an astrobject's PhotoMap")
-        
-            
-        if self.has_sources():
-            if id_ is None or id_ in self.list_id:
-                id_= ""
-                i = 1
-                while id_+"%d"%i in self.list_id:
-                    i+=1
-                id_ = id_+"%d"%i
+        #  Axis Definition
+        # -----------------
+        if ax is None:
+            fig = mpl.figure(figsize=[5,8])
+            ax  = fig.add_subplot(111)
+        elif not hasattr(ax,"plot"):
+            raise TypeError("The given ax is not a matplotlib axes")
         else:
-            id_ = "1"
+            fig = ax.figure
             
-        # -------------------
-        # - Match the catalogue
-        if self.has_catalogue() and match_catalogue:
-            photomap.match_catalogue(force_it=True, **kwargs)
-        # -------------------
-        # - Record the map            
-        self.photomaps[id_]  = photomap
-
-
-    # -------------- #
-    #  Catalogue     #
-    # -------------- #
-    def match_catalogue(self, deltadist=2*units.arcsec, **kwargs):
-        """ Match the catalogue to all the PhotoMaps """
-        if not self.has_catalogue():
-            raise AttributeError("No catalogue to match")
-        
-        [self.photomaps[id_].match_catalogue(deltadist=2*units.arcsec,
-                                              **kwargs)
-         for id_ in self.list_id]
-
-
-    def get_catindexes(self, inclusive=False):
-        """ Get the index of the catalogue that has been mathced.
-        if inclusive is False, only the catalogue entries matched in *all*
-        individual photomaps will be returned. If False *any* catalogue
-        entries that has been matched at least once will be returned
-
-        Returns
-        -------
-        list (indexes of the catalogue)
-        """
-        catindexes = [self.photomaps[id_].catmatch["idx_catalogue"] for id_ in self.list_id]
-        if inclusive:
-            return np.unique(np.concatenate(catindexes))
-        if len(catindexes) == 1:
-            return catindexes[0]
-        
-        return list(frozenset(catindexes[0]).intersection(*catindexes[1:]))
-
-    def catindex_to_index(self, catindex, dictformat=True, cleanindex=False):
-        """ Get the index of the individual photomaps associated to the given catindex
-        
-        Parameters
-        ----------
-        catindex: [int of list of]
-            catalogue entry that should be matched with the photomap indexes
-
-        dictformat: [bool] -optional-
-            The output will be returned in form of {id_: list_of_photomap_indexes}.
-            If False this will be a list of list following list_id sorting.
+        #  Definition
+        # -----------------            
+        prop= kwargs_update( dict(alpha = 0.7, mew=0, marker="o",ms=6, ls="None"),
+                            **kwargs )
+        if cmap is None:
+            cmap = mpl.cm.viridis
             
-        Returns
-        -------
-        dict following the ids
-        """
-        if dictformat:
-            return {id_: self.photomaps[id_].catindex_to_index(catindex,cleanindex=cleanindex)
-                    for id_ in self.list_id}
-        else:
-            return [self.photomaps[id_].catindex_to_index(catindex,cleanindex=cleanindex)
-                    for id_ in self.list_id]
-
+        #  Data
+        # -----------------
+        if catindexes is None:
+            if len(prop_catindex) ==0:
+                warnings.warn("Default catatalog indexes loaded")
+            catindexes = self.get_catindexes(**prop_catindex)
             
-    # - Super Mother CatalogueHandler
+        x = self.getcat("x",catindexes[::int(shownstep)] if int(shownstep)>1 else catindexes )
+        y = self.getcat("y",catindexes[::int(shownstep)] if int(shownstep)>1 else catindexes )
+        
+        [ax.plot(x[i],y[i], mfc=cmap(np.float(i)/(self.nsources-1)), **prop)
+         for i in range(self.nsources)]
+        
+        #  Output
+        # -----------------
+        fig.figout(savefile=savefile, show=show)
+
     
-    @_autogen_docstring_inheritance(CatalogueHandler.download_catalogue,"CatalogueHandler.download_catalogue")
-    def download_catalogue(self, source="sdss",
-                           set_it=True,force_it=False,
-                           radec=None, radius_degree=None,
-                           match_catalogue=True,match_angsep=2*units.arcsec,
-                           **kwargs):
-        #
-        # default definition of radec and radius_degree
-        #
-        if radec is None or radius_degree is None:
-            ra,dec = np.concatenate(self.get(["ra","dec"]), axis=0).T
-            
-        if radec is None:
-            radec = np.mean([ra,dec],axis=1)
-            radec = "%s %s"%(radec[0],radec[1])
-        if radius_degree is None:
-            radius_degree = np.max(np.std([ra,dec],axis=1)*5)
-            
-        out = super(PhotoMapCollection, self).download_catalogue(source=source,
-                                                        set_it=set_it, force_it=force_it,
-                                                        radec=radec, radius_degree=radius_degree,
-                                                        **kwargs)
-        if self.has_catalogue() and match_catalogue:
-            self.match_catalogue(deltadist=match_angsep)
 
-        return out
-    @_autogen_docstring_inheritance(CatalogueHandler.set_catalogue,"CatalogueHandler.set_catalogue")
-    def set_catalogue(self, catalogue, force_it=False, **kwargs):
-        # 
-        super(PhotoMapCollection, self).set_catalogue( catalogue, force_it=force_it, **kwargs)
-        [self.photomaps[id_].set_catalogue(self.catalogue, force_it=force_it, **kwargs)
-         for id_ in self.list_id]
-        
-    # =================== #
-    #   Properties        #
-    # =================== #
-    @property
-    def photomaps(self):
-        """ """
-        return self._handler
+
+
+
+
