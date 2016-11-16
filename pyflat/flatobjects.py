@@ -11,8 +11,12 @@ from astropy import units
 
 # - Astrobject
 from astrobject.utils.tools import kwargs_update
+from astrobject.baseobject  import BaseObject
 from astrobject.collections.photospatial import PhotoMapCollection
 
+
+# - shapely
+from shapely import geometry, vectorized
 
 
 def get_flatfielder( photomaps, wcs_extension=None, **kwargs ):
@@ -90,6 +94,7 @@ class FlatFielder( PhotoMapCollection ):
     # --------- #
     def projec_to_grid(self):
         pass
+
     # --------- #
     #  PLOTTER  #
     # --------- #
@@ -151,6 +156,99 @@ class FlatFielder( PhotoMapCollection ):
     
 
 
+#######################################
+#                                     #
+#                                     #
+#   Grids                             #
+#                                     #
+#                                     #
+#######################################
+class PatchGrid( BaseObject ):
+    """ """
+    PROPERTIES         = ["grid"]
+    SIDE_PROPERTIES    = []
+    DERIVED_PROPERTIES = [] 
 
+    def show(self, ax=None, cval=None, ec="0.5",
+             savefile=None, show=True,
+             vmin=None, vmax=None, cmap=None,
+             cax=None,clabel="",cbarprop={}, scaleax=True,
+             **kwargs):
+        """ """
+        import matplotlib.pyplot as mpl
+        from astrobject.utils.shape    import draw_polygon
+        from astrobject.utils.mpladdon import insert_ax, colorbar, figout
+        
+        #  Axis Setting
+        xmin,ymin, xmax, ymax = self.grid.bounds
+        if ax is None:
+            heigth = ymax-ymin
+            width = xmax-xmin
+            fig = mpl.figure(figsize=[5,5*float(heigth)/width])
+            ax  = fig.add_subplot(111)
+        else:
+            fig = ax.figure
+            
+        # Colors
+        if cval is not None:
+            if len(cval) != self.npoly:
+                raise ValueError("the size of cval (%d) do not corresponds to the number of polygons (%d)"%(len(cval),self.npoly))
+            
+            if vmin is None: vmin = np.percentile(cval[cval==cval], 5)
+            if vmax is None: vmax = np.percentile(cval[cval==cval], 95)
+            if cmap is None: cmap = mpl.cm.viridis
+            cval_ = (cval-vmin)/(vmax-vmin)
+            fcs = [cmap(c) if c==c else mpl.cm.binary(0.5,0.2) for c in cval_]
+        else:
+            fcs = ["None"]*self.npoly
 
+        # Patches
+        pol = [ draw_polygon(ax, p_, fc=fcs[i], ec=ec, **kwargs)
+               for i,p_ in enumerate(self.grid)]
+        
+        # ColorBar
+        if cax is None:
+            cax = ax.insert_ax("right", shrunk=0.93,space=.0,axspace=0.03)
+        if cax is not False:
+            cax.colorbar(cmap,vmin=vmin,vmax=vmax,label=clabel,**cbarprop)
 
+        # Scaling
+        if scaleax:
+            ax.set_xlim(xmin,xmax )
+            ax.set_ylim(ymin,ymax )
+            
+        # Output
+        fig.figout(savefile=savefile, show=show)
+
+        
+    def set_grid(self, multipolygon):
+        """ """
+        if geometry.MultiPolygon not in multipolygon.__class__.__mro__:
+            raise TypeError("This input grid must be a shapely's MultiPolygon ")
+        
+        self._properties["grid"] = multipolygon
+    
+    def get_maskin(self, x, y):
+        """ list of boolean mask saying if the points are wihtin
+        the grid. Ordering following that of the grid (self.grid)
+        """
+        return [vectorized.contains(s,x,y) for s in self.grid]
+    
+    # ================== #
+    #  Properties        #
+    # ================== #
+    @property
+    def grid(self):
+        """ """
+        return self._properties["grid"]
+    
+    def has_grid(self):
+        """ Does this method has a grid loaded? """
+        return self.grid is not None
+    
+    @property
+    def npoly(self):
+        """ number of polygon in the grid """
+        if not self.has_grid():
+            return None
+        return len(self.grid)
