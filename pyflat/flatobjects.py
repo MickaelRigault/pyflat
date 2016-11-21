@@ -5,7 +5,7 @@
 
 import warnings
 import numpy     as np
-
+from scipy import stats
 # - Astropy
 from astropy import units
 
@@ -18,6 +18,8 @@ from astrobject.collections.photospatial import PhotoMapCollection
 # - shapely
 from shapely import geometry, vectorized
 
+# - deco
+from deco import concurrent, synchronized
 
 def get_flatfielder( photomaps, wcs_extension=None, **kwargs ):
     """ Get a PhotoMap collection
@@ -40,16 +42,14 @@ def get_flatfielder( photomaps, wcs_extension=None, **kwargs ):
     -------
     PhotoMapCollection
     """
-    from astrobject import get_sepobject
-    
+    from .io import get_sepmap
+    print "Flat fielder loading"
     if not hasattr(photomaps, "__iter__"):
         raise TypeError("photomaps must be a list/array")
 
     # -- loading data
     if type(photomaps[0]) == str:
-        photomaps = [get_sepobject(filename, wcs_extension=wcs_extension, **kwargs) for filename in photomaps]
-        if wcs_extension is not None:
-            [p._derive_radec_() for p in photomaps if p.has_wcs()]
+        photomaps = [get_sepmap(filename, wcs_extension=wcs_extension, **kwargs) for filename in photomaps]
 
     return FlatFielder(photomaps, **kwargs)
 
@@ -72,7 +72,8 @@ class FlatFielder( PhotoMapCollection ):
     # --------- #
     #  GETTER   #
     # --------- #
-    def getcat_residual(self, param, catindex):
+    def getcat_residual(self, param, catindex,
+                        clipping = False,  sigma_low=4, sigma_high=4):
         """ get the residual parameter resulting from the
         difference between the parameter value in a given photomaps in
         comparison the its mean value accross the photomaps.
@@ -85,9 +86,17 @@ class FlatFielder( PhotoMapCollection ):
             raise TypeError("param must be a string not an array")
         if type(param) != str:
             raise TypeError("param must be a string (name of the parameter)")
-        
-        value = np.asarray(self.getcat(param, catindex))
-        return value- np.nanmean(value, axis=0)
+        # - value
+        value = np.asarray( self.getcat(param, catindex) )
+        # value - cleaning (which is a mean value of a given star including sigma clipping.
+        if clipping:
+            value_correction = np.asarray([ np.nanmean( stats.sigmaclip( v[~np.isnan(v)],sigma_low,sigma_high)[0]) for v in value.T])
+            if np.any(np.isnan(value_correction)):
+                print "WARNING Some nans: ", value_correction
+        else:
+            value_correction = np.nanmean(value, axis=0)
+            
+        return np.asarray(value) - value_correction
         
     # --------- #
     #  Project  #
@@ -156,6 +165,10 @@ class FlatFielder( PhotoMapCollection ):
     
 
 
+
+
+
+        
 #######################################
 #                                     #
 #                                     #
@@ -163,92 +176,3 @@ class FlatFielder( PhotoMapCollection ):
 #                                     #
 #                                     #
 #######################################
-class PatchGrid( BaseObject ):
-    """ """
-    PROPERTIES         = ["grid"]
-    SIDE_PROPERTIES    = []
-    DERIVED_PROPERTIES = [] 
-
-    def show(self, ax=None, cval=None, ec="0.5",
-             savefile=None, show=True,
-             vmin=None, vmax=None, cmap=None,
-             cax=None,clabel="",cbarprop={}, scaleax=True,
-             **kwargs):
-        """ """
-        import matplotlib.pyplot as mpl
-        from astrobject.utils.shape    import draw_polygon
-        from astrobject.utils.mpladdon import insert_ax, colorbar, figout
-        
-        #  Axis Setting
-        xmin,ymin, xmax, ymax = self.grid.bounds
-        if ax is None:
-            heigth = ymax-ymin
-            width = xmax-xmin
-            fig = mpl.figure(figsize=[5,5*float(heigth)/width])
-            ax  = fig.add_subplot(111)
-        else:
-            fig = ax.figure
-            
-        # Colors
-        if cval is not None:
-            if len(cval) != self.npoly:
-                raise ValueError("the size of cval (%d) do not corresponds to the number of polygons (%d)"%(len(cval),self.npoly))
-            
-            if vmin is None: vmin = np.percentile(cval[cval==cval], 5)
-            if vmax is None: vmax = np.percentile(cval[cval==cval], 95)
-            if cmap is None: cmap = mpl.cm.viridis
-            cval_ = (cval-vmin)/(vmax-vmin)
-            fcs = [cmap(c) if c==c else mpl.cm.binary(0.5,0.2) for c in cval_]
-        else:
-            fcs = ["None"]*self.npoly
-
-        # Patches
-        pol = [ draw_polygon(ax, p_, fc=fcs[i], ec=ec, **kwargs)
-               for i,p_ in enumerate(self.grid)]
-        
-        # ColorBar
-        if cax is None:
-            cax = ax.insert_ax("right", shrunk=0.93,space=.0,axspace=0.03)
-        if cax is not False:
-            cax.colorbar(cmap,vmin=vmin,vmax=vmax,label=clabel,**cbarprop)
-
-        # Scaling
-        if scaleax:
-            ax.set_xlim(xmin,xmax )
-            ax.set_ylim(ymin,ymax )
-            
-        # Output
-        fig.figout(savefile=savefile, show=show)
-
-        
-    def set_grid(self, multipolygon):
-        """ """
-        if geometry.MultiPolygon not in multipolygon.__class__.__mro__:
-            raise TypeError("This input grid must be a shapely's MultiPolygon ")
-        
-        self._properties["grid"] = multipolygon
-    
-    def get_maskin(self, x, y):
-        """ list of boolean mask saying if the points are wihtin
-        the grid. Ordering following that of the grid (self.grid)
-        """
-        return [vectorized.contains(s,x,y) for s in self.grid]
-    
-    # ================== #
-    #  Properties        #
-    # ================== #
-    @property
-    def grid(self):
-        """ """
-        return self._properties["grid"]
-    
-    def has_grid(self):
-        """ Does this method has a grid loaded? """
-        return self.grid is not None
-    
-    @property
-    def npoly(self):
-        """ number of polygon in the grid """
-        if not self.has_grid():
-            return None
-        return len(self.grid)
