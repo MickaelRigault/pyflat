@@ -76,7 +76,7 @@ class FlatFielder( PhotoMapCollection ):
 
 
 
-    def load_nightly_evolution(self, catindex=None, magkey="mag_auto"
+    def load_nightly_evolution(self, catindex=None, magkey="mag_auto",
                                show=True):
         """ Return the night evolution based on stellar magnitudes.
         
@@ -84,14 +84,15 @@ class FlatFielder( PhotoMapCollection ):
         ----------
         catindex: [N*M mask]
         """
-        from .utils 
-        if catindex is None:
-            catindex = self.get_catindexes(1, isolated_only=True, stars_only=True)
+        print "Not Done YET"
+        
+        #if catindex is None:
+       #     catindex = self.get_catindexes(1, isolated_only=True, stars_only=True)
         # - get the data you need
-        magres  = np.asarray(self.getcat_residual(magkey, catindex, nanflagged=True))
-        mjdres  = np.asarray(self.getcat_residual("mjd", catindex, clipping=False))
-        if show:
-            fig = mpl.add_subplot()
+       # magres  = np.asarray(self.getcat_residual(magkey, catindex, nanflagged=True))
+       # mjdres  = np.asarray(self.getcat_residual("mjd", catindex, clipping=False))
+       # if show:
+       #     fig = mpl.add_subplot()
         
         
     
